@@ -1,0 +1,21 @@
+<config>
+    <colors>
+        <color name="DesktopBackground">black</color>
+        <color name="WindowBackground">white</color>
+        <color name="InactiveTitleBorder">light slate grey</color>
+        <color name="InactiveTitleColor">slate grey</color>
+        <color name="InactiveFrameColor">dark slate grey</color>
+        <color name="ActiveFrameColor">dark goldenrod</color>
+        <color name="ActiveTitleColor">gold</color>
+        <color name="ActiveTitleBorder">saddle brown</color>
+    </colors>
+    <key-actions>
+        <action code="10">
+            <program>kitty</program>
+            <arguments>
+                <arg>-o</arg>
+                <arg>linux_display_server=x11</arg>
+            </arguments>
+        </action>
+    </key-actions>
+</config>
