@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using X11;
 using System.Diagnostics;
+using System.Linq;
 
 namespace CSWM
 {
@@ -234,13 +235,13 @@ namespace CSWM
         }
 
 
-        private void OnMapRequest(X11.XMapRequestEvent ev)
+        private void OnMapRequest(XMapRequestEvent ev)
         {
             AddFrame(ev.window);
             _ = Xlib.XMapWindow(Display, ev.window);
         }
 
-        private void OnButtonPressEvent(X11.XButtonEvent ev)
+        private void OnButtonPressEvent(XButtonEvent ev)
         {
             var client = ev.window;
             if (WindowIndexByClient.ContainsKey(ev.window) && ev.button == (uint)Button.LEFT)
@@ -258,6 +259,12 @@ namespace CSWM
             {
                 LeftClickFrame(ev);
                 client = WindowIndexByFrame[ev.window].child;
+            }
+
+            else if (Root == ev.window && ev.button == (uint)Button.LEFT)
+            {
+                Xlib.XSetInputFocus(Display, Root, RevertFocus.RevertToNone, 0);
+                Xlib.XRaiseWindow(Display, Root);
             }
             FocusAndRaiseWindow(client);
         }
@@ -323,7 +330,7 @@ namespace CSWM
             return;
         }
 
-        private void OnExposeEvent(X11.XExposeEvent ev)
+        private void OnExposeEvent(XExposeEvent ev)
         {
             if (WindowIndexByTitle.ContainsKey(ev.window))
             {
@@ -342,7 +349,6 @@ namespace CSWM
 
         private void LeftClickClientWindow(XButtonEvent ev)
         {
-            Window frame = WindowIndexByClient[ev.window].frame;
             // Release control of the left button to this application
             UnsetFocusTrap(ev.window);
             // Raise and focus it
@@ -361,7 +367,7 @@ namespace CSWM
         }
 
 
-        void OnMotionEvent(X11.XMotionEvent ev)
+        void OnMotionEvent(XMotionEvent ev)
         {
             if (WindowIndexByTitle.ContainsKey(ev.window))
             {
@@ -497,14 +503,14 @@ namespace CSWM
             MouseMovement.MotionStartY = ev.y_root;
         }
 
-        void OnMapNotify(X11.XMapEvent ev)
+        void OnMapNotify(XMapEvent ev)
         {
             Log.Debug($"(MapNotifyEvent) Window {ev.window} has been mapped.");
         }
 
-        void OnConfigureRequest(X11.XConfigureRequestEvent ev)
+        void OnConfigureRequest(XConfigureRequestEvent ev)
         {
-            var changes = new X11.XWindowChanges
+            var changes = new XWindowChanges
             {
                 x = ev.x,
                 y = ev.y,
@@ -524,7 +530,7 @@ namespace CSWM
             Xlib.XConfigureWindow(Display, ev.window, ev.value_mask, ref changes);
         }
 
-        void OnUnmapNotify(X11.XUnmapEvent ev)
+        void OnUnmapNotify(XUnmapEvent ev)
         {
             if (ev.@event == Root)
             {
@@ -538,7 +544,7 @@ namespace CSWM
         }
 
         // Annoyingly, this event fires when an application quits itself, resuling in some bad window errors.
-        void OnFocusOutEvent(X11.XFocusChangeEvent ev)
+        void OnFocusOutEvent(XFocusChangeEvent ev)
         {
             var title = WindowIndexByFrame[ev.window].title;
             var frame = ev.window;
@@ -552,7 +558,7 @@ namespace CSWM
             SetFocusTrap(WindowIndexByFrame[ev.window].child);
         }
 
-        void OnFocusInEvent(X11.XFocusChangeEvent ev)
+        void OnFocusInEvent(XFocusChangeEvent ev)
         {
             var title = WindowIndexByFrame[ev.window].title;
             var frame = ev.window;
@@ -564,7 +570,7 @@ namespace CSWM
             UpdateWindowTitle(title); //Redraw the title, purged by clearing.
         }
 
-        void OnDestroyNotify(X11.XDestroyWindowEvent ev)
+        void OnDestroyNotify(XDestroyWindowEvent ev)
         {
             if (WindowIndexByClient.ContainsKey(ev.window))
                 WindowIndexByClient.Remove(ev.window);
@@ -575,12 +581,12 @@ namespace CSWM
             Log.Debug($"(OnDestroyNotify) Destroyed {ev.window}");
         }
 
-        void OnReparentNotify(X11.XReparentEvent ev)
+        private static void OnReparentNotify(XReparentEvent ev)
         {
             return; // Never seems to be interesting and is often duplicated.
         }
 
-        void OnCreateNotify(X11.XCreateWindowEvent ev)
+        void OnCreateNotify(XCreateWindowEvent ev)
         {
             Log.Debug($"(OnCreateNotify) Created event {ev.window}, parent {ev.parent}");
         }
@@ -588,9 +594,7 @@ namespace CSWM
         public int Run()
         {
             IntPtr ev = Marshal.AllocHGlobal(24 * sizeof(long));
-
             Window ReturnedParent = 0, ReturnedRoot = 0;
-
 
             Xlib.XGrabServer(Display); // Lock the server during initialization
             Xlib.XQueryTree(Display, Root, ref ReturnedRoot, ref ReturnedParent,
@@ -610,17 +614,17 @@ namespace CSWM
             while (true)
             {
                 Xlib.XNextEvent(Display, ev);
-                var xevent = Marshal.PtrToStructure<X11.XAnyEvent>(ev);
+                var xevent = Marshal.PtrToStructure<XAnyEvent>(ev);
 
                 switch (xevent.type)
                 {
                     case (int)Event.KeyPress:
-                        var key_press_event = Marshal.PtrToStructure<X11.XKeyEvent>(ev);
-                        Console.WriteLine(key_press_event.keycode);
-                        if (key_press_event.type == 2)
+                        var keyPressEvent = Marshal.PtrToStructure<XKeyEvent>(ev);
+
+                        if (keyPressEvent.type == 2)
                         {
                             // TODO: control keys (eg. ctrl, super, alt)
-                            if (key_press_event.keycode == 9)
+                            if (keyPressEvent.keycode == 9)
                             {
                                 // 'escape'
                                 Console.WriteLine("User requested exit");
@@ -628,54 +632,71 @@ namespace CSWM
                                 return 0;
                             }
 
-                            foreach (KeyValuePair<int, KeyAction> entry in Configuration.KeyActions)
+
+                            foreach (var action in Configuration.KeyActions)
                             {
-                                if (key_press_event.keycode == entry.Key)
+                                if (keyPressEvent.keycode == action.KeyCode)
                                 {
-                                    Process cmd = new();
-                                    cmd.StartInfo.FileName = entry.Value.Program;
-                                    foreach (string x in entry.Value.Arguments)
-                                        cmd.StartInfo.ArgumentList.Add(x);
-                                    foreach (KeyValuePair<string, string> env in entry.Value.Environment)
-                                        cmd.StartInfo.Environment[env.Key] = env.Value;
-                                    cmd.StartInfo.Environment["DISPLAY"] = DisplayText;
-                                    cmd.StartInfo.CreateNoWindow = true;
-                                    cmd.StartInfo.UseShellExecute = false;
-                                    cmd.Start();
+
+                                    // Console.WriteLine($"keycode: {keyPressEvent.keycode}");
+                                    // foreach (var mod in action.Mods)
+                                    // {
+
+                                    //     Console.WriteLine($"{mod} is pressed: {(keyPressEvent.state & ((int)mod)) != 0}");
+                                    // }
+
+                                    if (action.Mods.All(mod =>
+                                        (keyPressEvent.state & ((int)mod)) != 0
+                                    ))
+                                    {
+                                        Console.WriteLine($"Starting {action.Program}: {action.Arguments.Aggregate("", (acc, x) => $"{acc} {x}")}");
+                                        Process cmd = new();
+                                        cmd.StartInfo.FileName = action.Program;
+                                        foreach (string x in action.Arguments)
+                                            cmd.StartInfo.ArgumentList.Add(x);
+                                        foreach (KeyValuePair<string, string> env in action.Environment)
+                                            cmd.StartInfo.Environment[env.Key] = env.Value;
+                                        cmd.StartInfo.Environment["DISPLAY"] = DisplayText;
+                                        cmd.StartInfo.CreateNoWindow = true;
+                                        cmd.StartInfo.UseShellExecute = false;
+                                        cmd.StartInfo.RedirectStandardError = true;
+                                        cmd.Start();
+                                    }
+
                                 }
                             }
                         }
                         break;
                     case (int)Event.DestroyNotify:
-                        var destroy_event = Marshal.PtrToStructure<X11.XDestroyWindowEvent>(ev);
+                        var destroy_event = Marshal.PtrToStructure<XDestroyWindowEvent>(ev);
                         OnDestroyNotify(destroy_event);
                         break;
                     case (int)Event.CreateNotify:
-                        var create_event = Marshal.PtrToStructure<X11.XCreateWindowEvent>(ev);
+                        var create_event = Marshal.PtrToStructure<XCreateWindowEvent>(ev);
                         OnCreateNotify(create_event);
                         break;
                     case (int)Event.MapNotify:
-                        var map_notify = Marshal.PtrToStructure<X11.XMapEvent>(ev);
+                        var map_notify = Marshal.PtrToStructure<XMapEvent>(ev);
                         OnMapNotify(map_notify);
                         break;
                     case (int)Event.MapRequest:
-                        var map_event = Marshal.PtrToStructure<X11.XMapRequestEvent>(ev);
+                        var map_event = Marshal.PtrToStructure<XMapRequestEvent>(ev);
                         OnMapRequest(map_event);
                         break;
                     case (int)Event.ConfigureRequest:
-                        var cfg_event = Marshal.PtrToStructure<X11.XConfigureRequestEvent>(ev);
+                        var cfg_event = Marshal.PtrToStructure<XConfigureRequestEvent>(ev);
                         OnConfigureRequest(cfg_event);
                         break;
                     case (int)Event.UnmapNotify:
-                        var unmap_event = Marshal.PtrToStructure<X11.XUnmapEvent>(ev);
+                        var unmap_event = Marshal.PtrToStructure<XUnmapEvent>(ev);
                         OnUnmapNotify(unmap_event);
                         break;
                     case (int)Event.ReparentNotify:
-                        var reparent_event = Marshal.PtrToStructure<X11.XReparentEvent>(ev);
+                        var reparent_event = Marshal.PtrToStructure<XReparentEvent>(ev);
                         OnReparentNotify(reparent_event);
                         break;
                     case (int)Event.ButtonPress:
-                        var button_press_event = Marshal.PtrToStructure<X11.XButtonEvent>(ev);
+                        var button_press_event = Marshal.PtrToStructure<XButtonEvent>(ev);
                         OnButtonPressEvent(button_press_event);
                         break;
                     case (int)Event.ButtonRelease:
@@ -684,21 +705,21 @@ namespace CSWM
                     case (int)Event.MotionNotify:
                         // We only want the newest motion event in order to reduce perceived lag
                         while (Xlib.XCheckMaskEvent(Display, EventMask.Button1MotionMask, ev)) { /* skip over */ }
-                        var motion_event = Marshal.PtrToStructure<X11.XMotionEvent>(ev);
+                        var motion_event = Marshal.PtrToStructure<XMotionEvent>(ev);
                         OnMotionEvent(motion_event);
                         break;
                     case (int)Event.FocusOut:
-                        var focus_out_event = Marshal.PtrToStructure<X11.XFocusChangeEvent>(ev);
+                        var focus_out_event = Marshal.PtrToStructure<XFocusChangeEvent>(ev);
                         OnFocusOutEvent(focus_out_event);
                         break;
                     case (int)Event.FocusIn:
-                        var focus_in_event = Marshal.PtrToStructure<X11.XFocusChangeEvent>(ev);
+                        var focus_in_event = Marshal.PtrToStructure<XFocusChangeEvent>(ev);
                         OnFocusInEvent(focus_in_event);
                         break;
                     case (int)Event.ConfigureNotify:
                         break;
                     case (int)Event.Expose:
-                        var expose_event = Marshal.PtrToStructure<X11.XExposeEvent>(ev);
+                        var expose_event = Marshal.PtrToStructure<XExposeEvent>(ev);
                         OnExposeEvent(expose_event);
                         break;
                     default:

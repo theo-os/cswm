@@ -10,11 +10,13 @@
         <color name="ActiveTitleBorder">saddle brown</color>
     </colors>
     <key-actions>
-        <action code="10">
-            <program>kitty</program>
+        <action code="27" mod="Alt">
+            <program>rofi</program>
             <arguments>
-                <arg>-o</arg>
-                <arg>linux_display_server=x11</arg>
+                <arg>-modi</arg>
+                <arg>drun</arg>
+                <arg>-show</arg>
+                <arg>drun</arg>
             </arguments>
         </action>
     </key-actions>

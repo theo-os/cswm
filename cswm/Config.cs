@@ -20,6 +20,8 @@ namespace CSWM
 
     public class KeyAction
     {
+        public int KeyCode;
+        public IEnumerable<ModKey> Mods;
         public string Program;
         public IEnumerable<string> Arguments;
         public Dictionary<string, string> Environment;
@@ -28,7 +30,7 @@ namespace CSWM
     public class Configuration
     {
         public Dictionary<string, string> Colors;
-        public Dictionary<int, KeyAction> KeyActions;
+        public IEnumerable<KeyAction> KeyActions;
 
         public static Configuration LoadFromFile(string file)
         {
@@ -40,13 +42,27 @@ namespace CSWM
                     x => x.Attribute("name").Value,
                     x => x.Value
                 ),
-                KeyActions = root.Element("key-actions").Elements().ToDictionary(
-                    x => int.Parse(x.Attribute("code").Value),
-                    // program name
-                    x => new KeyAction()
+                KeyActions = root.Element("key-actions").Elements().Select(
+                    x =>
+                    new KeyAction()
                     {
+                        KeyCode = int.Parse(x.Attribute("code").Value),
                         Program = x.Element("program").Value,
-                        Arguments = x.Element("arguments").Elements().Select(x => x.Value),
+                        Mods = x
+                        .Attribute("mod")
+                        .Value
+                        .Split(",")
+                        .Where(x => !string.IsNullOrEmpty(x))
+                        .Select(x =>
+                        {
+                            if (Enum.TryParse(x, out ModKey mod))
+                                return mod;
+                            else return ModKey.None;
+                        }),
+                        Arguments = x
+                        .Element("arguments")
+                        .Elements()
+                        .Select(x => x.Value),
                         Environment = new(),
                     }
                 ),
